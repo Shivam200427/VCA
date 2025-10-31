@@ -4,6 +4,10 @@ const joinBtn = document.getElementById('joinBtn');
 const roomInput = document.getElementById('roomId');
 const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
+const uploadForm = document.getElementById('uploadForm');
+const reportFile = document.getElementById('reportFile');
+const uploadStatus = document.getElementById('uploadStatus');
+const reportsList = document.getElementById('reportsList');
 
 let localStream;
 let peerConnection;
@@ -107,6 +111,68 @@ socket.on('user-left', () => {
     remoteVideo.srcObject.getTracks().forEach((t) => t.stop());
     remoteVideo.srcObject = null;
   }
+});
+
+// Receive existing reports when joining a room
+socket.on('existing-reports', (items) => {
+  if (Array.isArray(items)) {
+    items.forEach(({ filename, url }) => addReportItem({ filename, url }));
+  }
+});
+
+// Upload PDF report
+if (uploadForm) {
+  uploadForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    uploadStatus.textContent = '';
+    const file = reportFile.files && reportFile.files[0];
+    if (!file) {
+      uploadStatus.textContent = 'Select a PDF file first';
+      return;
+    }
+    if (file.type !== 'application/pdf') {
+      uploadStatus.textContent = 'Only PDF files are allowed';
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('report', file);
+
+    try {
+      const res = await fetch('/upload', { method: 'POST', body: formData });
+      if (!res.ok) throw new Error('Upload failed');
+      const data = await res.json();
+      uploadStatus.textContent = `Uploaded: ${data.filename}`;
+
+      // Share the uploaded report link with the room (doctor)
+      if (roomId) {
+        socket.emit('report-shared', { roomId, filename: data.filename, url: data.path || `/uploads/${data.filename}` });
+      }
+
+      // Show in local list
+      addReportItem({ filename: data.filename, url: data.path || `/uploads/${data.filename}` });
+    } catch (err) {
+      uploadStatus.textContent = 'Upload error';
+      console.error(err);
+    }
+  });
+}
+
+function addReportItem({ filename, url }) {
+  if (!reportsList) return;
+  const li = document.createElement('li');
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.textContent = filename;
+  li.appendChild(a);
+  reportsList.appendChild(li);
+}
+
+// Receive shared report links from peers in the room
+socket.on('report-shared', ({ filename, url }) => {
+  addReportItem({ filename, url });
 });
 
 
